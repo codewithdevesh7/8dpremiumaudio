@@ -1,10 +1,15 @@
 import os
-from flask import Flask, request, Response
+from flask import Flask, request, redirect, jsonify
 from flask_cors import CORS
 import yt_dlp
 
 app = Flask(__name__)
-CORS(app)  # Cross-Origin access allow karega Netlify ke liye
+CORS(app)
+
+# Ye route add karne se browser me 'Not Found' nahi aayega
+@app.route('/')
+def home():
+    return jsonify({"status": "live", "message": "8D Audio Backend is running successfully!"})
 
 @app.route('/stream')
 def stream_audio():
@@ -18,13 +23,14 @@ def stream_audio():
         'noplaylist': True
     }
 
-    with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-        info = ydl.extract_info(video_url, download=False)
-        audio_url = info.get('url')
+    try:
+        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+            info = ydl.extract_info(video_url, download=False)
+            audio_url = info.get('url')
 
-    # Redirect direct high-speed audio stream
-    from flask import redirect
-    return redirect(audio_url)
+        return redirect(audio_url)
+    except Exception as e:
+        return str(e), 500
 
 if __name__ == '__main__':
     port = int(os.environ.get('PORT', 5000))
