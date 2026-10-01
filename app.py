@@ -1,27 +1,16 @@
 import os
-import requests
-from flask import Flask, request, Response, jsonify
+from flask import Flask, request, Response
 from flask_cors import CORS
 import yt_dlp
 
 app = Flask(__name__)
-CORS(app, resources={r"/*": {"origins": "*"}})
+CORS(app)  # Cross-Origin access allow karega Netlify ke liye
 
-# ROOT ROUTE (Fixes 404 Not Found)
-@app.route('/')
-def home():
-    return jsonify({
-        "status": "online",
-        "service": "8D Spatial Audio API",
-        "developer": "codewithdevesh"
-    })
-
-# YOUTUBE STREAM ROUTE
 @app.route('/stream')
 def stream_audio():
     video_url = request.args.get('url')
     if not video_url:
-        return jsonify({"error": "Missing URL parameter"}), 400
+        return "Missing URL parameter", 400
 
     ydl_opts = {
         'format': 'bestaudio/best',
@@ -29,26 +18,13 @@ def stream_audio():
         'noplaylist': True
     }
 
-    try:
-        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-            info = ydl.extract_info(video_url, download=False)
-            audio_url = info.get('url')
+    with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+        info = ydl.extract_info(video_url, download=False)
+        audio_url = info.get('url')
 
-        if not audio_url:
-            return jsonify({"error": "Could not extract stream URL"}), 500
-
-        # Direct stream proxy
-        req = requests.get(audio_url, stream=True, headers={'User-Agent': 'Mozilla/5.0'})
-        response = Response(
-            req.iter_content(chunk_size=1024 * 128),
-            content_type=req.headers.get('Content-Type', 'audio/webm'),
-            status=req.status_code
-        )
-        response.headers['Access-Control-Allow-Origin'] = '*'
-        return response
-
-    except Exception as e:
-        return jsonify({"error": str(e)}), 500
+    # Redirect direct high-speed audio stream
+    from flask import redirect
+    return redirect(audio_url)
 
 if __name__ == '__main__':
     port = int(os.environ.get('PORT', 5000))
