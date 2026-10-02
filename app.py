@@ -1,5 +1,7 @@
 import os
 import re
+import json
+import urllib.parse
 import requests
 from flask import Flask, request, redirect, jsonify
 from flask_cors import CORS
@@ -30,53 +32,61 @@ def stream_audio():
     if not video_id:
         return jsonify({"error": "Invalid YouTube URL"}), 400
 
-    # 1. Piped Active Public Endpoints
-    piped_mirrors = [
-        f"https://pipedapi.drgns.space/streams/{video_id}",
-        f"https://piped-api.garudalinux.org/streams/{video_id}",
-        f"https://api.piped.projectsegfau.lt/streams/{video_id}",
-        f"https://pipedapi.leptons.xyz/streams/{video_id}"
-    ]
+    # YouTube Official Android Innertube Client (Bypasses bot blocks completely)
+    endpoint = "https://www.youtube.com/youtubei/v1/player"
+    headers = {
+        "User-Agent": "com.google.android.youtube/19.09.37 (Linux; U; Android 11) gzip",
+        "Content-Type": "application/json",
+        "X-YouTube-Client-Name": "3",
+        "X-YouTube-Client-Version": "19.09.37"
+    }
 
-    for api in piped_mirrors:
-        try:
-            r = requests.get(api, timeout=6)
-            if r.status_code == 200:
-                data = r.json()
-                audio_streams = data.get('audioStreams', [])
-                if audio_streams:
-                    stream_url = audio_streams[-1].get('url')
-                    if stream_url:
-                        res = redirect(stream_url)
-                        res.headers['Access-Control-Allow-Origin'] = '*'
-                        return res
-        except Exception:
-            continue
+    payload = {
+        "videoId": video_id,
+        "context": {
+            "client": {
+                "clientName": "ANDROID",
+                "clientVersion": "19.09.37",
+                "androidSdkVersion": 30,
+                "hl": "en",
+                "gl": "US"
+            }
+        }
+    }
 
-    # 2. Invidious Fallback Mirrors
-    invidious_mirrors = [
-        f"https://inv.nadeko.net/api/v1/videos/{video_id}",
-        f"https://invidious.jing.rocks/api/v1/videos/{video_id}",
-        f"https://vid.priv.au/api/v1/videos/{video_id}"
-    ]
+    try:
+        res = requests.post(endpoint, json=payload, headers=headers, timeout=10)
+        data = res.json()
+        
+        streaming_data = data.get('streamingData', {})
+        formats = streaming_data.get('adaptiveFormats', [])
 
-    for api in invidious_mirrors:
-        try:
-            r = requests.get(api, timeout=6)
-            if r.status_code == 200:
-                data = r.json()
-                formats = data.get('adaptiveFormats', [])
-                audio_streams = [f for f in formats if 'audio' in f.get('type', '')]
-                if audio_streams:
-                    audio_url = audio_streams[-1].get('url')
-                    if audio_url:
-                        res = redirect(audio_url)
-                        res.headers['Access-Control-Allow-Origin'] = '*'
-                        return res
-        except Exception:
-            continue
+        # Filter strictly audio streams
+        audio_streams = [
+            f for f in formats 
+            if 'audio' in f.get('mimeType', '') and 'url' in f
+        ]
 
-    return jsonify({"error": "Stream extraction failed across all mirrors. Please try another song."}), 500
+        if not audio_streams:
+            # Agar direct url format me nahi mila toh normal formats me dekhein
+            audio_streams = [
+                f for f in streaming_data.get('formats', [])
+                if 'url' in f
+            ]
+
+        if audio_streams:
+            # Sort by highest audio bitrate
+            audio_streams.sort(key=lambda x: x.get('bitrate', 0), reverse=True)
+            audio_url = audio_streams[0]['url']
+            
+            response = redirect(audio_url)
+            response.headers['Access-Control-Allow-Origin'] = '*'
+            return response
+
+    except Exception as e:
+        print(f"Error fetching from Innertube: {e}")
+
+    return jsonify({"error": "Failed to extract clean audio stream. Please test another YouTube link."}), 500
 
 if __name__ == '__main__':
     port = int(os.environ.get('PORT', 5000))
