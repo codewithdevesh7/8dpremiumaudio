@@ -1,7 +1,8 @@
 import os
+import re
+import requests
 from flask import Flask, request, redirect, jsonify
 from flask_cors import CORS
-import yt_dlp
 
 app = Flask(__name__)
 CORS(app, resources={r"/*": {"origins": "*"}})
@@ -14,43 +15,45 @@ def home():
         "developer": "codewithdevesh"
     })
 
+def extract_video_id(url):
+    # YouTube URL se 11 digit ki Video ID nikalne ke liye
+    pattern = r'(?:v=|\/|youtu\.be\/)([0-9A-Za-z_-]{11})'
+    match = re.search(pattern, url)
+    return match.group(1) if match else None
+
 @app.route('/stream')
 def stream_audio():
     video_url = request.args.get('url')
     if not video_url:
         return jsonify({"error": "Missing URL parameter"}), 400
 
-    ydl_opts = {
-        'format': 'bestaudio/best',
-        'quiet': True,
-        'noplaylist': True,
-        'nocheckcertificate': True,
-        # YouTube data-center blocks ko bypass karne ke liye mobile clients:
-        'extractor_args': {
-            'youtube': {
-                'player_client': ['android', 'ios', 'web']
-            }
-        },
-        'http_headers': {
-            'User-Agent': 'com.google.android.youtube/19.09.37 (Linux; U; Android 14; en_US) gzip'
-        }
-    }
+    video_id = extract_video_id(video_url)
+    if not video_id:
+        return jsonify({"error": "Invalid YouTube URL"}), 400
 
-    try:
-        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-            info = ydl.extract_info(video_url, download=False)
-            audio_url = info.get('url')
+    # Fast Piped API instances jo IP block nahi karte
+    instances = [
+        f"https://pipedapi.kavin.rocks/streams/{video_id}",
+        f"https://api.piped.privacydev.net/streams/{video_id}",
+        f"https://pipedapi.tokhmi.xyz/streams/{video_id}"
+    ]
 
-        if not audio_url:
-            return jsonify({"error": "Stream URL could not be extracted"}), 500
+    for api_url in instances:
+        try:
+            res = requests.get(api_url, timeout=7)
+            if res.status_code == 200:
+                data = res.json()
+                audio_streams = data.get('audioStreams', [])
+                if audio_streams:
+                    # Best quality audio stream select karein
+                    audio_url = audio_streams[-1].get('url')
+                    response = redirect(audio_url)
+                    response.headers['Access-Control-Allow-Origin'] = '*'
+                    return response
+        except Exception:
+            continue
 
-        response = redirect(audio_url)
-        response.headers['Access-Control-Allow-Origin'] = '*'
-        return response
-
-    except Exception as e:
-        print(f"Extraction error: {e}")
-        return jsonify({"error": str(e)}), 500
+    return jsonify({"error": "YouTube audio extract nahi ho paya, doosra link try karein"}), 500
 
 if __name__ == '__main__':
     port = int(os.environ.get('PORT', 5000))
