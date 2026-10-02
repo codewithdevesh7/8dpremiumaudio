@@ -1,11 +1,9 @@
 import os
-import requests
-from flask import Flask, request, Response, jsonify
+from flask import Flask, request, redirect, jsonify
 from flask_cors import CORS
 import yt_dlp
 
 app = Flask(__name__)
-# Sabhi origins (Netlify, localhost, etc.) ke liye CORS allow
 CORS(app, resources={r"/*": {"origins": "*"}})
 
 @app.route('/')
@@ -25,7 +23,17 @@ def stream_audio():
     ydl_opts = {
         'format': 'bestaudio/best',
         'quiet': True,
-        'noplaylist': True
+        'noplaylist': True,
+        'nocheckcertificate': True,
+        # YouTube data-center blocks ko bypass karne ke liye mobile clients:
+        'extractor_args': {
+            'youtube': {
+                'player_client': ['android', 'ios', 'web']
+            }
+        },
+        'http_headers': {
+            'User-Agent': 'com.google.android.youtube/19.09.37 (Linux; U; Android 14; en_US) gzip'
+        }
     }
 
     try:
@@ -34,19 +42,14 @@ def stream_audio():
             audio_url = info.get('url')
 
         if not audio_url:
-            return jsonify({"error": "Stream URL nahi mili"}), 500
+            return jsonify({"error": "Stream URL could not be extracted"}), 500
 
-        # Direct stream proxy
-        req = requests.get(audio_url, stream=True, headers={'User-Agent': 'Mozilla/5.0'})
-        response = Response(
-            req.iter_content(chunk_size=1024 * 128),
-            content_type=req.headers.get('Content-Type', 'audio/webm'),
-            status=req.status_code
-        )
+        response = redirect(audio_url)
         response.headers['Access-Control-Allow-Origin'] = '*'
         return response
 
     except Exception as e:
+        print(f"Extraction error: {e}")
         return jsonify({"error": str(e)}), 500
 
 if __name__ == '__main__':
