@@ -30,54 +30,53 @@ def stream_audio():
     if not video_id:
         return jsonify({"error": "Invalid YouTube URL"}), 400
 
-    # Cobalt API ke public instances jo bot block bypass karte hain
-    cobalt_instances = [
-        "https://api.cobalt.tools",
-        "https://cobalt-api.kwiatekm.tokyo",
-        "https://co.wuk.sh"
+    # 1. Piped Active Public Endpoints
+    piped_mirrors = [
+        f"https://pipedapi.drgns.space/streams/{video_id}",
+        f"https://piped-api.garudalinux.org/streams/{video_id}",
+        f"https://api.piped.projectsegfau.lt/streams/{video_id}",
+        f"https://pipedapi.leptons.xyz/streams/{video_id}"
     ]
 
-    clean_yt_url = f"https://www.youtube.com/watch?v={video_id}"
-    headers = {
-        "Accept": "application/json",
-        "Content-Type": "application/json",
-        "User-Agent": "Mozilla/5.0"
-    }
-    payload = {
-        "url": clean_yt_url,
-        "downloadMode": "audio",
-        "audioFormat": "mp3"
-    }
-
-    for base_url in cobalt_instances:
+    for api in piped_mirrors:
         try:
-            res = requests.post(f"{base_url}/", json=payload, headers=headers, timeout=8)
-            if res.status_code == 200:
-                data = res.json()
-                stream_url = data.get('url')
-                if stream_url:
-                    response = redirect(stream_url)
-                    response.headers['Access-Control-Allow-Origin'] = '*'
-                    return response
+            r = requests.get(api, timeout=6)
+            if r.status_code == 200:
+                data = r.json()
+                audio_streams = data.get('audioStreams', [])
+                if audio_streams:
+                    stream_url = audio_streams[-1].get('url')
+                    if stream_url:
+                        res = redirect(stream_url)
+                        res.headers['Access-Control-Allow-Origin'] = '*'
+                        return res
         except Exception:
             continue
 
-    # Fallback to Invidious if Cobalt is busy
-    try:
-        inv_res = requests.get(f"https://invidious.nerdvpn.de/api/v1/videos/{video_id}", timeout=6)
-        if inv_res.status_code == 200:
-            inv_data = inv_res.json()
-            format_streams = inv_data.get('adaptiveFormats', [])
-            audio_streams = [f for f in format_streams if 'audio' in f.get('type', '')]
-            if audio_streams:
-                audio_url = audio_streams[-1].get('url')
-                response = redirect(audio_url)
-                response.headers['Access-Control-Allow-Origin'] = '*'
-                return response
-    except Exception:
-        pass
+    # 2. Invidious Fallback Mirrors
+    invidious_mirrors = [
+        f"https://inv.nadeko.net/api/v1/videos/{video_id}",
+        f"https://invidious.jing.rocks/api/v1/videos/{video_id}",
+        f"https://vid.priv.au/api/v1/videos/{video_id}"
+    ]
 
-    return jsonify({"error": "Unable to extract audio stream at this moment. Please retry."}), 500
+    for api in invidious_mirrors:
+        try:
+            r = requests.get(api, timeout=6)
+            if r.status_code == 200:
+                data = r.json()
+                formats = data.get('adaptiveFormats', [])
+                audio_streams = [f for f in formats if 'audio' in f.get('type', '')]
+                if audio_streams:
+                    audio_url = audio_streams[-1].get('url')
+                    if audio_url:
+                        res = redirect(audio_url)
+                        res.headers['Access-Control-Allow-Origin'] = '*'
+                        return res
+        except Exception:
+            continue
+
+    return jsonify({"error": "Stream extraction failed across all mirrors. Please try another song."}), 500
 
 if __name__ == '__main__':
     port = int(os.environ.get('PORT', 5000))
